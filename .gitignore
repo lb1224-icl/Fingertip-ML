@@ -1,0 +1,23 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+
+# VS Code settings
+.vscode/
+
+# Streamlit cache
+.streamlit/
+
+# Environment variables
+.env
+
+# Photos    
+data/
