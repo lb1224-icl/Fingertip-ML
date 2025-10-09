@@ -47,7 +47,14 @@ def train_model(num_epochs = 20, batch_size = 32, lr = 1e-3):
         transform=transform
     )
 
-    dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_dataset = FingertipDataset(
+        img_dir=DATA_DIR + "/images/val",
+        label_dir=DATA_DIR + "/labels/val",
+        transform=transform
+    ) 
+
+    dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers = 3)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers = 3)
 
     model = FingertipCNN(3).to(device)
     criterion = nn.MSELoss() # Used to evaluate current progress
@@ -55,7 +62,7 @@ def train_model(num_epochs = 20, batch_size = 32, lr = 1e-3):
 
     for epoch in range(num_epochs):
         model.train()
-        total_loss = 0
+        total_train_loss = 0
 
         for images, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}"):
             images, labels = images.to(device), labels.to(device)
@@ -66,10 +73,25 @@ def train_model(num_epochs = 20, batch_size = 32, lr = 1e-3):
             loss.backward()
             optimizer.step()
 
-            total_loss += loss.item() * images.size(0)
+            total_train_loss += loss.item() * images.size(0)
 
-        avg_loss = total_loss / len(train_dataset)
-        print(f"Epoch [{epoch+1}/{num_epochs}] Loss: {avg_loss:.4f}")
+
+        avg_train_loss = total_train_loss / len(train_dataset)
+
+        model.eval()
+        total_val_loss = 0.0
+
+        with torch.no_grad():
+            for images, labels in tqdm(val_dataloader, desc=f"Validating Epoch {epoch+1}/{num_epochs}"):
+                images, labels = images.to(device), labels.to(device)
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                total_val_loss += loss.item() * images.size(0)
+
+        avg_val_loss = total_val_loss / len(val_dataset)
+
+
+        print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
     torch.save(model.state_dict(), MODEL_SAVE_PATH)
     print(f"✅ Training complete. Model saved at {MODEL_SAVE_PATH}")
