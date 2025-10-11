@@ -89,7 +89,7 @@ def train_model(num_epochs = 20, batch_size = 32, lr = 1e-3):
                 total_val_loss += loss.item() * images.size(0)
 
         avg_val_loss = total_val_loss / len(val_dataset)
-
+  
 
         print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
