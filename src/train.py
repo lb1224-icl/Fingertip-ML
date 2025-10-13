@@ -22,17 +22,18 @@ import os
 
 from datetime import datetime
 
-DATA_DIR = "../data/hand_keypoint_dataset_26k/hand_keypoint_dataset_26k"
-MODEL_SAVE_PATH = f"../modles/fingertip_model_{datetime.now().date()}_{datetime.now().time()}.pth"
+import config
+
+
 
 def download_dataset_if_needed():
-    if not os.path.exists(DATA_DIR):
+    if not os.path.exists(config.DATA_DIR):
         print("Downloading dataset...")
         download_files()
     else:
         print("Dataset already exists ")
 
-def train_model(num_epochs = 20, batch_size = 32, lr = 1e-3):
+def train_model(num_epochs = config.NUM_EPOCHS, batch_size = config.BATCH_SIZE, lr = config.LEARNING_RATE):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Training on {device}")
 
@@ -42,19 +43,19 @@ def train_model(num_epochs = 20, batch_size = 32, lr = 1e-3):
     ])
 
     train_dataset = FingertipDataset(
-        img_dir=DATA_DIR + "/images/train",
-        label_dir=DATA_DIR + "/labels/train",
+        img_dir=config.DATA_DIR + "/images/train",
+        label_dir=config.DATA_DIR + "/labels/train",
         transform=transform
     )
 
     val_dataset = FingertipDataset(
-        img_dir=DATA_DIR + "/images/val",
-        label_dir=DATA_DIR + "/labels/val",
+        img_dir=config.DATA_DIR + "/images/val",
+        label_dir=config.DATA_DIR + "/labels/val",
         transform=transform
     ) 
 
-    dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers = 3)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers = 3)
+    dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers = 4,  pin_memory=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers = 4,  pin_memory=True)
 
     model = FingertipCNN(3).to(device)
     criterion = nn.MSELoss() # Used to evaluate current progress
@@ -93,10 +94,10 @@ def train_model(num_epochs = 20, batch_size = 32, lr = 1e-3):
 
         print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
-    torch.save(model.state_dict(), MODEL_SAVE_PATH)
-    print(f"✅ Training complete. Model saved at {MODEL_SAVE_PATH}")
+    torch.save(model.state_dict(), config.MODEL_SAVE_PATH + f"{datetime.now().date()}_{datetime.now().time()}.pth")
+    print(f"✅ Training complete. Model saved at {config.MODEL_SAVE_PATH}")
 
 if __name__ == "__main__":
     download_dataset_if_needed()
-    train_model()
+    train_model(config.NUM_EPOCHS, config.BATCH_SIZE, config.LEARNING_RATE)
 
