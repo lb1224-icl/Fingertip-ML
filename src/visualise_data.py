@@ -24,8 +24,8 @@ dataset = FingertipDataset(
 )
 
 # === HELPER: reverse normalization ===
-MEAN = (0.5, 0.5, 0.5)
-STD = (0.5, 0.5, 0.5)
+MEAN = config.IMAGENET_MEAN
+STD = config.IMAGENET_STD
 
 def denormalize_image(tensor):
     img = tensor.clone().permute(1, 2, 0).cpu().numpy()

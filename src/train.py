@@ -15,7 +15,7 @@ import torchvision.transforms as transforms
 
 import torchmetrics
 
-from model import FingertipCNN
+from model import FingertipCNN, FingertipResNet
 from dataset import FingertipDataset, download_files
 from torchvision import transforms
 import os
@@ -38,8 +38,9 @@ def train_model(num_epochs = config.NUM_EPOCHS, batch_size = config.BATCH_SIZE, 
     print(f"Training on {device}")
 
     transform = transforms.Compose([
-        transforms.Resize((128, 128)),
-        transforms.ToTensor()
+        transforms.Resize(config.IMG_SIZE),
+        transforms.ToTensor(),
+        transforms.Normalize(config.IMAGENET_MEAN, config.IMAGENET_STD)
     ])
 
     train_dataset = FingertipDataset(
@@ -57,9 +58,9 @@ def train_model(num_epochs = config.NUM_EPOCHS, batch_size = config.BATCH_SIZE, 
     dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers = 4,  pin_memory=True)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers = 4,  pin_memory=True)
 
-    model = FingertipCNN(3).to(device)
+    model = FingertipResNet(num_outputs=10, pretrained=True).to(device)
     criterion = nn.MSELoss() # Used to evaluate current progress
-    optimizer = optim.Adam(model.parameters(), lr=lr) # Improves parameters
+    optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE) # Improves parameters
 
     for epoch in range(num_epochs):
         model.train()

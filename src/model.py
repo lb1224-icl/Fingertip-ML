@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 import torch.nn.functional as F
+from torchvision.models import resnet18
 
 class FingertipCNN(nn.Module):
     def __init__(self, in_channels):
@@ -40,6 +41,33 @@ class FingertipCNN(nn.Module):
         x = self.fc3(x) # No ReLU as this is final output layer
 
         return x
+
+
+class FingertipResNet(nn.Module):
+    def __init__(self, num_outputs=10, pretrained=True):
+        super().__init__()
+
+        # Load ResNet18 backbone (pretrained on ImageNet)
+        self.backbone = resnet18(weights='IMAGENET1K_V1' if pretrained else None)
+
+        # Replace the classification head with a regression head
+        in_features = self.backbone.fc.in_features
+        self.backbone.fc = nn.Sequential(
+            nn.Linear(in_features, 512),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(512, num_outputs)   # 10 for 5 fingertips (x,y)
+        )
+
+    def forward(self, x):
+        return self.backbone(x)
+
+if __name__ == "__main__":
+    # quick test
+    model = FingertipResNet(num_outputs=10, pretrained=False)
+    dummy = torch.randn(2, 3, 128, 128)
+    out = model(dummy)
+    print("Output shape:", out.shape)  # should be [2, 10]
 
 
 
