@@ -17,4 +17,4 @@ NUM_EPOCHS = 40
 
 # Scheduler settings
 STEP_SIZE = 10
-GAMA = 0.5
+GAMMA = 0.5
