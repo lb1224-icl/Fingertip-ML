@@ -61,7 +61,7 @@ def train_model(num_epochs = config.NUM_EPOCHS, batch_size = config.BATCH_SIZE, 
     model = FingertipResNet(num_outputs=10, pretrained=True).to(device)
     criterion = nn.MSELoss() # Used to evaluate current progress
     optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE) # Improves parameters
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=8, gamma=0.5)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, config.STEP_SIZE, config.GAMMA)
 
     for epoch in range(num_epochs):
         model.train()
