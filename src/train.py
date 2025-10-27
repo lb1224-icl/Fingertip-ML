@@ -61,7 +61,7 @@ def train_model(num_epochs = config.NUM_EPOCHS, batch_size = config.BATCH_SIZE, 
     model = FingertipResNet(num_outputs=10, pretrained=True).to(device)
     criterion = nn.MSELoss() # Used to evaluate current progress
     optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE) # Improves parameters
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=8, gamma=0.5)
 
     for epoch in range(num_epochs):
         model.train()
@@ -93,7 +93,7 @@ def train_model(num_epochs = config.NUM_EPOCHS, batch_size = config.BATCH_SIZE, 
         avg_val_loss = total_val_loss / len(val_dataset)
   
         scheduler.step()
-        
+
         print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
     torch.save(model.state_dict(), config.MODEL_SAVE_PATH + f"{datetime.now().date()}_{datetime.now().time()}.pth")
