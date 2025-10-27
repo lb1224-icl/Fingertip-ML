@@ -78,8 +78,6 @@ def train_model(num_epochs = config.NUM_EPOCHS, batch_size = config.BATCH_SIZE, 
 
             total_train_loss += loss.item() * images.size(0)
 
-        scheduler.step()
-
         avg_train_loss = total_train_loss / len(train_dataset)
 
         model.eval()
@@ -94,7 +92,8 @@ def train_model(num_epochs = config.NUM_EPOCHS, batch_size = config.BATCH_SIZE, 
 
         avg_val_loss = total_val_loss / len(val_dataset)
   
-
+        scheduler.step()
+        
         print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
     torch.save(model.state_dict(), config.MODEL_SAVE_PATH + f"{datetime.now().date()}_{datetime.now().time()}.pth")
