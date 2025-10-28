@@ -59,7 +59,7 @@ def train_model(num_epochs = config.NUM_EPOCHS, batch_size = config.BATCH_SIZE, 
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers = 4,  pin_memory=True)
 
     model = FingertipResNet(num_outputs=10, pretrained=True).to(device)
-    criterion = nn.MSELoss() # Used to evaluate current progress
+    criterion = nn.SmoothL1Loss(reduction='none', beta=1.0) # Used to evaluate current progress
     optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE) # Improves parameters
     scheduler = optim.lr_scheduler.StepLR(optimizer, config.STEP_SIZE, config.GAMMA)
 

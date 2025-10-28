@@ -13,7 +13,8 @@ FONT_THICKNESS = 2
 # === TRANSFORM ===
 transform = transforms.Compose([
     transforms.Resize(config.IMG_SIZE),
-    transforms.ToTensor()
+    transforms.ToTensor(),
+    transforms.Normalize(config.IMAGENET_MEAN, config.IMAGENET_STD)
 ])
 
 # === DATASET ===
@@ -29,11 +30,10 @@ STD = config.IMAGENET_STD
 
 def denormalize_image(tensor):
     img = tensor.clone().permute(1, 2, 0).cpu().numpy()
-    img = img * np.array(STD) + np.array(MEAN)
+    img = img * np.array(config.IMAGENET_STD) + np.array(config.IMAGENET_MEAN)
     img = np.clip(img, 0, 1)
-    img = (img[:, :, ::-1] * 255).astype(np.uint8)  # RGB->BGR for OpenCV
-    img = np.ascontiguousarray(img)
-    return img
+    img = (img[:, :, ::-1] * 255).astype(np.uint8)  # RGB→BGR for OpenCV
+    return np.ascontiguousarray(img)
 
 # === VISUALIZATION LOOP ===
 def visualize_dataset():
