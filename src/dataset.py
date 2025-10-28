@@ -54,7 +54,6 @@ class FingertipDataset(Dataset):
             base = idx_key * 3
             x = keypoints[base + 0]
             y = keypoints[base + 1]
-            v = keypoints[base + 2]   # visibility (0, 1, or 2)
 
             fingertip_coords.extend([x, y])
 
