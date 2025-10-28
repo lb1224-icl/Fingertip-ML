@@ -1,105 +1,82 @@
-import numpy as np
-import pandas as pd
-
 import torch
-from torch import optim
-from torch import nn
+import torch.nn as nn
+import torch.optim as optim
 from torch.utils.data import DataLoader
+from torchvision import transforms
 from tqdm import tqdm
 
-import torchvision
-
-import torch.nn.functional as F
-import torchvision.datasets as datasets
-import torchvision.transforms as transforms
-
-import torchmetrics
-
-from model import FingertipCNN, FingertipResNet
-from dataset import FingertipDataset, download_files
-from torchvision import transforms
-import os
-
-from datetime import datetime
-
+from dataset import FingertipDataset
+from model import FingertipResNet
 import config
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"[INFO] Using device: {device}")
 
+transform = transforms.Compose([
+    transforms.Resize(config.IMG_SIZE),
+    transforms.ToTensor(),
+    transforms.Normalize(config.IMAGENET_MEAN, config.IMAGENET_STD)
+])
 
-def download_dataset_if_needed():
-    if not os.path.exists(config.DATA_DIR):
-        print("Downloading dataset...")
-        download_files()
-    else:
-        print("Dataset already exists ")
+train_dataset = FingertipDataset(config.TRAIN_IMAGES, config.TRAIN_LABELS, transform)
+val_dataset = FingertipDataset(config.VAL_IMAGES, config.VAL_LABELS, transform)
 
-def train_model(num_epochs = config.NUM_EPOCHS, batch_size = config.BATCH_SIZE, lr = config.LEARNING_RATE):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Training on {device}")
+train_loader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=config.NUM_WORKERS)
+val_loader = DataLoader(val_dataset, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=config.NUM_WORKERS)
 
-    transform = transforms.Compose([
-        transforms.Resize(config.IMG_SIZE),
-        transforms.ToTensor(),
-        transforms.Normalize(config.IMAGENET_MEAN, config.IMAGENET_STD)
-    ])
+model = FingertipResNet(num_outputs=config.NUM_OUTPUTS).to(device)
+criterion = nn.MSELoss(reduction='none')
+optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
 
-    train_dataset = FingertipDataset(
-        img_dir=config.DATA_DIR + "/images/train",
-        label_dir=config.DATA_DIR + "/labels/train",
-        transform=transform
-    )
+best_val_loss = float("inf")
 
-    val_dataset = FingertipDataset(
-        img_dir=config.DATA_DIR + "/images/val",
-        label_dir=config.DATA_DIR + "/labels/val",
-        transform=transform
-    ) 
+for epoch in range(config.NUM_EPOCHS):
+    # --- TRAIN ---
+    model.train()
+    total_train_loss = 0
+    for imgs, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{config.NUM_EPOCHS} [TRAIN]"):
+        imgs, labels = imgs.to(device), labels.to(device)
+        optimizer.zero_grad()
+        outputs = model(imgs)
 
-    dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers = 4,  pin_memory=True)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers = 4,  pin_memory=True)
+        pred_xy = outputs[:, 0::3]
+        true_xy = labels[:, 0::3]
+        vis_mask = labels[:, 2::3] == 2
+        loss_mat = criterion(pred_xy, true_xy)
+        masked_loss = (loss_mat * vis_mask).sum() / (vis_mask.sum() + 1e-8)
 
-    model = FingertipResNet(num_outputs=10, pretrained=True).to(device)
-    criterion = nn.MSELoss() # Used to evaluate current progress
-    optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE) # Improves parameters
-    scheduler = optim.lr_scheduler.StepLR(optimizer, config.STEP_SIZE, config.GAMMA)
+        masked_loss.backward()
+        optimizer.step()
+        total_train_loss += masked_loss.item() * imgs.size(0)
 
-    for epoch in range(num_epochs):
-        model.train()
-        total_train_loss = 0
+    avg_train_loss = total_train_loss / len(train_loader.dataset)
 
-        for images, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}"):
-            images, labels = images.to(device), labels.to(device)
+    # --- VALIDATION ---
+    model.eval()
+    total_val_loss = 0
+    with torch.no_grad():
+        for imgs, labels in tqdm(val_loader, desc=f"Epoch {epoch+1}/{config.NUM_EPOCHS} [VAL]"):
+            imgs, labels = imgs.to(device), labels.to(device)
+            outputs = model(imgs)
 
-            outputs = model(images)
-            loss = criterion(outputs, labels)
+            pred_xy = outputs[:, 0::3]
+            true_xy = labels[:, 0::3]
+            vis_mask = labels[:, 2::3] == 2
+            loss_mat = criterion(pred_xy, true_xy)
+            masked_loss = (loss_mat * vis_mask).sum() / (vis_mask.sum() + 1e-8)
+            total_val_loss += masked_loss.item() * imgs.size(0)
 
-            loss.backward()
-            optimizer.step()
+    avg_val_loss = total_val_loss / len(val_loader.dataset)
+    scheduler.step()
 
-            total_train_loss += loss.item() * images.size(0)
+    print(f"[EPOCH {epoch+1}/{config.NUM_EPOCHS}] "
+          f"Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
-        avg_train_loss = total_train_loss / len(train_dataset)
+    # --- SAVE BEST ---
+    if avg_val_loss < best_val_loss:
+        best_val_loss = avg_val_loss
+        torch.save(model.state_dict(), config.SAVE_MODEL_PATH)
+        print(f"[INFO] ✅ Saved best model at epoch {epoch+1} (val loss {best_val_loss:.4f})")
 
-        model.eval()
-        total_val_loss = 0.0
-
-        with torch.no_grad():
-            for images, labels in tqdm(val_dataloader, desc=f"Validating Epoch {epoch+1}/{num_epochs}"):
-                images, labels = images.to(device), labels.to(device)
-                outputs = model(images)
-                loss = criterion(outputs, labels)
-                total_val_loss += loss.item() * images.size(0)
-
-        avg_val_loss = total_val_loss / len(val_dataset)
-  
-        scheduler.step()
-
-        print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
-
-    torch.save(model.state_dict(), config.MODEL_SAVE_PATH + f"{datetime.now().date()}_{datetime.now().time()}.pth")
-    print(f"✅ Training complete. Model saved at {config.MODEL_SAVE_PATH}")
-
-if __name__ == "__main__":
-    download_dataset_if_needed()
-    train_model(config.NUM_EPOCHS, config.BATCH_SIZE, config.LEARNING_RATE)
-
+print(f"[INFO] Training complete. Best val loss: {best_val_loss:.4f}")
