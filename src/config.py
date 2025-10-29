@@ -13,7 +13,7 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 # Training settings
 BATCH_SIZE = 20
 LEARNING_RATE = 0.001
-NUM_EPOCHS = 1
+NUM_EPOCHS = 60
 
 # Scheduler settings
 STEP_SIZE = 10
