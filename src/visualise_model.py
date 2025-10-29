@@ -32,8 +32,10 @@ dataset = FingertipDataset(
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model = FingertipResNet(num_outputs=10, pretrained=False).to(device)
 
+model_name = input("Name of model (ending in .pth): ")
+
 # Replace this filename with the trained model you want to visualise
-MODEL_PATH = os.path.join(config.MODEL_SAVE_PATH, "YOUR_MODEL_NAME.pth")
+MODEL_PATH = os.path.join(config.MODEL_SAVE_PATH, model_name)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model.eval()
 
