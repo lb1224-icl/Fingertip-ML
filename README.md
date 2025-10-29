@@ -6,8 +6,7 @@ This project implements a **real-time fingertip detection system** using a **cus
 
 **Implemented so far:**
 - Built and trained a **PyTorch CNN** from scratch to regress fingertip positions from images.  
-- Parsed YOLOv8 keypoint labels to extract **thumb, index, middle, ring, and little finger tips** (indices 4, 8, 12, 16, 20).  
-- Added **training and validation loops** with progress tracking using `tqdm`.  
+- Parsed YOLOv8 keypoint labels to extract **thumb, index, middle, ring, and little finger tips** (indices 4, 8, 12, 16, 20).   
 - Achieved **MSE loss ~0.01** on training/validation data, corresponding to ~13 pixel average error at 128×128 resolution.  
 - Clean project structure with modular `dataset.py`, `model.py`, and `train.py`.  
 - Dataset sourced and managed via **Kaggle** API.
