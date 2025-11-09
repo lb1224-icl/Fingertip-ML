@@ -3,10 +3,12 @@ import torch
 import numpy as np
 from torchvision import transforms
 
+from PIL import Image
+
 from model import FingertipResNet
 import config
 
-CAMERA_INDEX = 0       # Default webcam
+CAMERA_INDEX = 1      # Default webcam
 CONFIDENCE_RADIUS = 6  
 DISPLAY_SCALE = 1.0   
 
@@ -17,7 +19,7 @@ print(f"[INFO] Using device: {device}")
 
 model = FingertipResNet(num_outputs=10, pretrained=False).to(device)
 
-MODEL_PATH = f"{config.MODEL_SAVE_PATH}/CURRENT_MODEL.pth"
+MODEL_PATH = f"{config.MODEL_SAVE_PATH}/fingertip_model_2025-11-09_13-57-28.pth"
 model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model.eval()
 
@@ -54,11 +56,12 @@ while True:
 
     # Preprocess for model 
     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    img_pil = transform(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).unsqueeze(0).to(device)
+    img_pil = Image.fromarray(img_rgb)  # ✅ convert to PIL
+    input_tensor = transform(img_pil).unsqueeze(0).to(device)
 
     # Predict fingertip positions 
     with torch.no_grad():
-        preds = model(img_pil).cpu().numpy().reshape(-1, 2)
+        preds = model(input_tensor).cpu().numpy().reshape(-1, 2)
 
     # Overlay predictions 
     for i, (x, y) in enumerate(preds):
