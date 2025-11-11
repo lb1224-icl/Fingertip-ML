@@ -2,8 +2,6 @@ import os
 from datetime import datetime
 from tqdm import tqdm
 
-import keyboard
-
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
@@ -59,60 +57,62 @@ def train_model(num_epochs=config.NUM_EPOCHS, batch_size=config.BATCH_SIZE, lr=c
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, config.STEP_SIZE, config.GAMMA)
 
-    for epoch in range(num_epochs):
-        model.train()
-        total_train_loss = 0
-        total_train_pixel_error = 0
+    try:
+            for epoch in range(num_epochs):
+                model.train()
+                total_train_loss = 0
+                total_train_pixel_error = 0
 
-        train_pbar = tqdm(train_loader, desc=f"🧠 Epoch {epoch+1}/{num_epochs} [Train]", leave=False)
-        for images, labels in train_pbar:
+                train_pbar = tqdm(train_loader, desc=f"🧠 Epoch {epoch+1}/{num_epochs} [Train]", leave=False)
+                for images, labels in train_pbar:
 
-            if keyboard.is_pressed('s'):
-                print("\n🛑 Training interrupted by user. Saving model...")
-                timestamp = f"{datetime.now().date()}_{datetime.now().strftime('%H-%M-%S')}"
-                save_path = os.path.join(config.MODEL_SAVE_PATH, f"fingertip_earlystop_{timestamp}.pth")
-                torch.save(model.state_dict(), save_path)
-                print(f"✅ Model saved to {save_path}")
-                return 
+                    images, labels = images.to(device), labels.to(device)
 
-            images, labels = images.to(device), labels.to(device)
+                    outputs = model(images)                          # [B, 10]
+                    loss = criterion(outputs, labels)
 
-            outputs = model(images)                          # [B, 10]
-            loss = criterion(outputs, labels)
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+                    total_train_loss += loss.item() * images.size(0)
+                    total_train_pixel_error += mean_pixel_error(outputs.detach(), labels.detach()) * images.size(0)
 
-            total_train_loss += loss.item() * images.size(0)
-            total_train_pixel_error += mean_pixel_error(outputs.detach(), labels.detach()) * images.size(0)
+                avg_train_loss = total_train_loss / len(train_dataset)
+                avg_train_pixel_error = total_train_pixel_error / len(train_dataset)
 
-        avg_train_loss = total_train_loss / len(train_dataset)
-        avg_train_pixel_error = total_train_pixel_error / len(train_dataset)
+                # VALIDATION
+                model.eval()
+                total_val_loss = 0
+                total_val_pixel_error = 0
 
-        # VALIDATION
-        model.eval()
-        total_val_loss = 0
-        total_val_pixel_error = 0
+                val_pbar = tqdm(val_loader, desc=f"🔎 Epoch {epoch+1}/{num_epochs} [Val]", leave=False)
+                with torch.no_grad():
+                    for images, labels in val_pbar:
+                        images, labels = images.to(device), labels.to(device)
+                        outputs = model(images)
+                        val_loss = criterion(outputs, labels)
 
-        val_pbar = tqdm(val_loader, desc=f"🔎 Epoch {epoch+1}/{num_epochs} [Val]", leave=False)
-        with torch.no_grad():
-            for images, labels in val_pbar:
-                images, labels = images.to(device), labels.to(device)
-                outputs = model(images)
-                val_loss = criterion(outputs, labels)
+                        total_val_loss += val_loss.item() * images.size(0)
+                        total_val_pixel_error += mean_pixel_error(outputs, labels) * images.size(0)
 
-                total_val_loss += val_loss.item() * images.size(0)
-                total_val_pixel_error += mean_pixel_error(outputs, labels) * images.size(0)
+                avg_val_loss = total_val_loss / len(val_dataset)
+                avg_val_pixel_error = total_val_pixel_error / len(val_dataset)
 
-        avg_val_loss = total_val_loss / len(val_dataset)
-        avg_val_pixel_error = total_val_pixel_error / len(val_dataset)
+                scheduler.step()
 
-        scheduler.step()
+                print(f"📊 Epoch [{epoch+1}/{num_epochs}] "
+                        f"| Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} "
+                        f"| Train PxErr: {avg_train_pixel_error:.2f}px | Val PxErr: {avg_val_pixel_error:.2f}px")
 
-        print(f"📊 Epoch [{epoch+1}/{num_epochs}] "
-              f"| Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} "
-              f"| Train PxErr: {avg_train_pixel_error:.2f}px | Val PxErr: {avg_val_pixel_error:.2f}px")
+    except KeyboardInterrupt:
+        # --- Early stop handler ---
+        print("\n🛑 Training interrupted by user.")
+        timestamp = f"{datetime.now().date()}_{datetime.now().strftime('%H-%M-%S')}"
+        save_path = os.path.join(config.MODEL_SAVE_PATH, f"fingertip_earlystop_{timestamp}.pth")
+        torch.save(model.state_dict(), save_path)
+        print(f"✅ Model saved to {save_path}")
+        return
 
     #  Save model 
     timestamp = f"{datetime.now().date()}_{datetime.now().strftime('%H-%M-%S')}"
