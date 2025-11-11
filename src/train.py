@@ -2,6 +2,8 @@ import os
 from datetime import datetime
 from tqdm import tqdm
 
+import keyboard
+
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
@@ -11,7 +13,6 @@ from dataset import FingertipDataset, download_files
 from model import FingertipResNet
 import config
 
-# --- Helper function to compute average pixel error ---
 def mean_pixel_error(preds, targets, img_size=config.IMG_SIZE[0]):
     # preds, targets shape: [B, 10]
     diff = torch.abs(preds - targets) * img_size
@@ -53,20 +54,27 @@ def train_model(num_epochs=config.NUM_EPOCHS, batch_size=config.BATCH_SIZE, lr=c
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
 
-    # --- Model ---
     model = FingertipResNet(num_outputs=10, pretrained=True).to(device)
     criterion = nn.SmoothL1Loss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, config.STEP_SIZE, config.GAMMA)
 
     for epoch in range(num_epochs):
-        # ======== TRAIN ========
         model.train()
         total_train_loss = 0
         total_train_pixel_error = 0
 
         train_pbar = tqdm(train_loader, desc=f"🧠 Epoch {epoch+1}/{num_epochs} [Train]", leave=False)
         for images, labels in train_pbar:
+
+            if keyboard.is_pressed('s'):
+                print("\n🛑 Training interrupted by user. Saving model...")
+                timestamp = f"{datetime.now().date()}_{datetime.now().strftime('%H-%M-%S')}"
+                save_path = os.path.join(config.MODEL_SAVE_PATH, f"fingertip_earlystop_{timestamp}.pth")
+                torch.save(model.state_dict(), save_path)
+                print(f"✅ Model saved to {save_path}")
+                return 
+
             images, labels = images.to(device), labels.to(device)
 
             outputs = model(images)                          # [B, 10]
@@ -82,7 +90,7 @@ def train_model(num_epochs=config.NUM_EPOCHS, batch_size=config.BATCH_SIZE, lr=c
         avg_train_loss = total_train_loss / len(train_dataset)
         avg_train_pixel_error = total_train_pixel_error / len(train_dataset)
 
-        # ======== VALIDATION ========
+        # VALIDATION
         model.eval()
         total_val_loss = 0
         total_val_pixel_error = 0
@@ -106,7 +114,7 @@ def train_model(num_epochs=config.NUM_EPOCHS, batch_size=config.BATCH_SIZE, lr=c
               f"| Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} "
               f"| Train PxErr: {avg_train_pixel_error:.2f}px | Val PxErr: {avg_val_pixel_error:.2f}px")
 
-    # --- Save model ---
+    #  Save model 
     timestamp = f"{datetime.now().date()}_{datetime.now().strftime('%H-%M-%S')}"
     save_path = os.path.join(config.MODEL_SAVE_PATH, f"fingertip_model_{timestamp}.pth")
     torch.save(model.state_dict(), save_path)
