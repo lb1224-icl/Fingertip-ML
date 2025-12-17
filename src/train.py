@@ -1,126 +1,183 @@
-import os
-from datetime import datetime
-from tqdm import tqdm
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Dict
 
 import torch
-from torch import nn, optim
+from torch import nn
 from torch.utils.data import DataLoader
-from torchvision import transforms
+from tqdm import tqdm
+import yaml
 
-from dataset import FingertipDataset, download_files
-from model import FingertipResNet
-import config
-
-def mean_pixel_error(preds, targets, img_size=config.IMG_SIZE[0]):
-    # preds, targets shape: [B, 10]
-    diff = torch.abs(preds - targets) * img_size
-    return diff.mean().item()
-
-
-def download_dataset_if_needed():
-    if not os.path.exists(config.DATA_DIR):
-        print("📥 Downloading dataset...")
-        download_files()
-    else:
-        print("✅ Dataset already exists.")
+if __package__ is None or __package__ == "":
+    sys.path.append(str(Path(__file__).resolve().parent))
+    from dataset.hand_kp_yolo import HandKeypointYOLODataset, collate_fn
+    from models.unet_kp import UNetKP
+    import eval as eval_utils
+else:
+    from .dataset.hand_kp_yolo import HandKeypointYOLODataset, collate_fn
+    from .models.unet_kp import UNetKP
+    from . import eval as eval_utils
 
 
-def train_model(num_epochs=config.NUM_EPOCHS, batch_size=config.BATCH_SIZE, lr=config.LEARNING_RATE):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"🚀 Training on {device}")
+def load_config(path: str) -> Dict:
+    with open(path, "r") as f:
+        cfg = yaml.safe_load(f)
+    return cfg
 
-    # --- Transforms ---
-    transform = transforms.Compose([
-        transforms.Resize(config.IMG_SIZE),
-        transforms.ToTensor(),
-        transforms.Normalize(config.IMAGENET_MEAN, config.IMAGENET_STD)
-    ])
 
-    # --- Datasets & Loaders ---
-    train_dataset = FingertipDataset(
-        img_dir=os.path.join(config.DATA_DIR, "images/train"),
-        label_dir=os.path.join(config.DATA_DIR, "labels/train"),
-        transform=transform
+def masked_mse_loss(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """
+    pred/target: (B, K, H, W), mask: (B, K)
+    Computes per-keypoint MSE and zeros out keys where mask==0.
+    """
+    mse = (pred - target) ** 2
+    mask = mask.unsqueeze(-1).unsqueeze(-1)  # (B, K, 1, 1)
+    mse = mse * mask
+    denom = mask.sum() + 1e-6
+    return mse.sum() / denom
+
+
+def build_dataloaders(cfg: Dict):
+    train_ds = HandKeypointYOLODataset(
+        root=cfg["dataset_root"],
+        split=cfg.get("train_split", "train"),
+        num_keypoints=cfg["num_keypoints"],
+        img_size=cfg["img_size"],
+        sigma=cfg.get("sigma", 1.5),
+        augment=cfg.get("augment", False),
+        color_jitter=cfg.get("color_jitter", False),
     )
 
-    val_dataset = FingertipDataset(
-        img_dir=os.path.join(config.DATA_DIR, "images/val"),
-        label_dir=os.path.join(config.DATA_DIR, "labels/val"),
-        transform=transform
-    )
-
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
-
-    model = FingertipResNet(num_outputs=10, pretrained=True).to(device)
-    criterion = nn.SmoothL1Loss()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, config.STEP_SIZE, config.GAMMA)
-
+    val_loader = None
     try:
-            for epoch in range(num_epochs):
-                model.train()
-                total_train_loss = 0
-                total_train_pixel_error = 0
+        val_ds = HandKeypointYOLODataset(
+            root=cfg["dataset_root"],
+            split=cfg.get("val_split", "val"),
+            num_keypoints=cfg["num_keypoints"],
+            img_size=cfg["img_size"],
+            sigma=cfg.get("sigma", 1.5),
+            augment=False,
+            color_jitter=False,
+        )
+        val_loader = DataLoader(
+            val_ds,
+            batch_size=cfg["batch_size"],
+            shuffle=False,
+            num_workers=cfg.get("num_workers", 4),
+            collate_fn=collate_fn,
+        )
+    except Exception as e:
+        print(f"[WARN] Validation loader not created: {e}")
 
-                train_pbar = tqdm(train_loader, desc=f"🧠 Epoch {epoch+1}/{num_epochs} [Train]", leave=False)
-                for images, labels in train_pbar:
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=cfg["batch_size"],
+        shuffle=True,
+        num_workers=cfg.get("num_workers", 4),
+        collate_fn=collate_fn,
+    )
+    return train_loader, val_loader
 
-                    images, labels = images.to(device), labels.to(device)
 
-                    outputs = model(images)                          # [B, 10]
-                    loss = criterion(outputs, labels)
+def train_one_epoch(
+    model: nn.Module,
+    loader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+) -> float:
+    model.train()
+    running_loss = 0.0
+    pbar = tqdm(loader, desc="Train", leave=False)
+    for batch in pbar:
+        images = batch["image"].to(device)
+        heatmaps = batch["heatmaps"].to(device)
+        mask = batch["mask"].to(device)
 
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
+        optimizer.zero_grad()
+        outputs = model(images)
+        loss = masked_mse_loss(outputs, heatmaps, mask)
+        loss.backward()
+        optimizer.step()
 
-                    total_train_loss += loss.item() * images.size(0)
-                    total_train_pixel_error += mean_pixel_error(outputs.detach(), labels.detach()) * images.size(0)
+        running_loss += loss.item() * images.size(0)
+        pbar.set_postfix({"loss": loss.item()})
 
-                avg_train_loss = total_train_loss / len(train_dataset)
-                avg_train_pixel_error = total_train_pixel_error / len(train_dataset)
+    return running_loss / len(loader.dataset)
 
-                # VALIDATION
-                model.eval()
-                total_val_loss = 0
-                total_val_pixel_error = 0
 
-                val_pbar = tqdm(val_loader, desc=f"🔎 Epoch {epoch+1}/{num_epochs} [Val]", leave=False)
-                with torch.no_grad():
-                    for images, labels in val_pbar:
-                        images, labels = images.to(device), labels.to(device)
-                        outputs = model(images)
-                        val_loss = criterion(outputs, labels)
+def main():
+    parser = argparse.ArgumentParser(description="Train heatmap-based hand keypoint model.")
+    parser.add_argument("--config", type=str, default="data/config.yaml", help="Path to YAML config.")
+    args = parser.parse_args()
 
-                        total_val_loss += val_loss.item() * images.size(0)
-                        total_val_pixel_error += mean_pixel_error(outputs, labels) * images.size(0)
+    cfg = load_config(args.config)
 
-                avg_val_loss = total_val_loss / len(val_dataset)
-                avg_val_pixel_error = total_val_pixel_error / len(val_dataset)
+    device_str = cfg.get("device", "auto")
+    if device_str == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device(device_str)
+    print(f"Using device: {device}")
 
-                scheduler.step()
+    train_loader, val_loader = build_dataloaders(cfg)
 
-                print(f"📊 Epoch [{epoch+1}/{num_epochs}] "
-                        f"| Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} "
-                        f"| Train PxErr: {avg_train_pixel_error:.2f}px | Val PxErr: {avg_val_pixel_error:.2f}px")
+    model = UNetKP(num_keypoints=cfg["num_keypoints"], base_channels=32).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg["learning_rate"])
 
-    except KeyboardInterrupt:
-        # --- Early stop handler ---
-        print("\n🛑 Training interrupted by user.")
-        timestamp = f"{datetime.now().date()}_{datetime.now().strftime('%H-%M-%S')}"
-        save_path = os.path.join(config.MODEL_SAVE_PATH, f"fingertip_earlystop_{timestamp}.pth")
-        torch.save(model.state_dict(), save_path)
-        print(f"✅ Model saved to {save_path}")
-        return
+    save_dir = Path(cfg.get("save_dir", "outputs/checkpoints"))
+    save_dir.mkdir(parents=True, exist_ok=True)
 
-    #  Save model 
-    timestamp = f"{datetime.now().date()}_{datetime.now().strftime('%H-%M-%S')}"
-    save_path = os.path.join(config.MODEL_SAVE_PATH, f"fingertip_model_{timestamp}.pth")
-    torch.save(model.state_dict(), save_path)
-    print(f"✅ Training complete. Model saved at {save_path}")
+    history = []
+    best_pck = -1.0
+
+    for epoch in range(1, cfg["epochs"] + 1):
+        print(f"\nEpoch {epoch}/{cfg['epochs']}")
+        train_loss = train_one_epoch(model, train_loader, optimizer, device)
+
+        metrics = {"pck": None, "mean_pixel_error": None, "num_keypoints": 0}
+        if val_loader is not None:
+            metrics = eval_utils.evaluate_model(
+                model,
+                val_loader,
+                device,
+                pck_threshold=cfg.get("pck_threshold", 5.0),
+            )
+            print(
+                f"Val - PCK@{cfg.get('pck_threshold', 5.0)}: {metrics['pck']:.3f}, "
+                f"MPE: {metrics['mean_pixel_error']:.2f} px over {metrics['num_keypoints']} kps"
+            )
+
+        print(f"Train loss: {train_loss:.4f}")
+
+        # Save checkpoint every epoch
+        ckpt_path = save_dir / f"epoch_{epoch}.pth"
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state": model.state_dict(),
+                "optimizer_state": optimizer.state_dict(),
+                "train_loss": train_loss,
+                "metrics": metrics,
+                "config": cfg,
+            },
+            ckpt_path,
+        )
+
+        # Track best PCK
+        if metrics["pck"] is not None and metrics["pck"] > best_pck:
+            best_pck = metrics["pck"]
+            torch.save(model.state_dict(), save_dir / "best_model.pth")
+
+        history.append({"epoch": epoch, "train_loss": train_loss, **metrics})
+
+    # Save training history for logging/proof
+    hist_path = save_dir / "history.json"
+    with open(hist_path, "w") as f:
+        json.dump(history, f, indent=2)
+    print(f"Saved history to {hist_path}")
 
 
 if __name__ == "__main__":
-    download_dataset_if_needed()
-    train_model()
+    main()
