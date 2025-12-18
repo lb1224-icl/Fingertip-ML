@@ -13,11 +13,11 @@ import yaml
 if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parent))
     from dataset.hand_kp_yolo import HandKeypointYOLODataset, collate_fn
-    from models.unet_kp import UNetKP
+    from model.unet_kp import UNetKP
     import eval as eval_utils
 else:
     from .dataset.hand_kp_yolo import HandKeypointYOLODataset, collate_fn
-    from .models.unet_kp import UNetKP
+    from .model.unet_kp import UNetKP
     from . import eval as eval_utils
 
 
@@ -109,7 +109,7 @@ def train_one_epoch(
 
 def main():
     parser = argparse.ArgumentParser(description="Train heatmap-based hand keypoint model.")
-    parser.add_argument("--config", type=str, default="data/config.yaml", help="Path to YAML config.")
+    parser.add_argument("--config", type=str, default="./config.yaml", help="Path to YAML config.")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
