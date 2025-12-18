@@ -21,4 +21,5 @@ ENV/
 
 # Photos    
 data/
+outputs/
 models/

@@ -1,17 +1,17 @@
 names:
   0: "hand"
-dataset_root: data/hand_keypoint_dataset_26k
+dataset_root: data/hand_keypoint_dataset_26k/hand_keypoint_dataset_26k
 train_split: train
 val_split: val 
 num_keypoints: 21
 img_size: 256
-sigma: 2.5
+sigma: 2
 batch_size: 16
 epochs: 30
 learning_rate: 0.001
 num_workers: 4
 save_dir: outputs/checkpoints
 pck_threshold: 5.0  # pixels
-device: auto 
+device: cuda 
 augment: true
 color_jitter: false
