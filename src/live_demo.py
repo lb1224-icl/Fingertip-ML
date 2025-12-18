@@ -1,12 +1,3 @@
-"""
-Live camera demo: overlay predicted hand keypoints on webcam frames.
-
-Usage (from repo root):
-    python -m src.live_demo --model outputs/checkpoints/best_model.pth --config config.yaml
-    # optional: choose camera index or alternate checkpoint
-    python -m src.live_demo --model path/to/epoch_10.pth --cam 1
-"""
-
 import argparse
 import sys
 from pathlib import Path
