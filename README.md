@@ -74,7 +74,12 @@ python -m src.live_demo --config config.yaml --model outputs/checkpoints/best_mo
 python -m src.live_demo --conf-mid 0.2 --conf-high 0.6
 ```
 
+## CLI help
+For full command-line options and descriptions for `visualise` and `live_demo`, see `cli_reference.md`.
+
 ## Notes
 - `sigma` controls heatmap spread; larger is smoother/easier early training.
 - `pck_threshold` is in pixels (matching `img_size`), adjust for use case.
 
+## Future Improvements
+- **Data Cleaning**: Dataset has mislabelled keypoints for some photos. Need to go through with MediaPipe and mark the data points correctly
