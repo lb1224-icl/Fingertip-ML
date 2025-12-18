@@ -48,9 +48,15 @@ def preprocess_frame(frame_bgr: np.ndarray, img_size: int) -> torch.Tensor:
     return tensor
 
 
-def draw_predictions(frame_bgr: np.ndarray, preds: np.ndarray, color=(0, 0, 255)):
-    """Draw predicted keypoints onto the BGR frame."""
-    for (x, y) in preds.astype(int):
+def draw_predictions(frame_bgr: np.ndarray, preds: np.ndarray, confs: np.ndarray, mid_th: float, high_th: float):
+    """Draw predicted keypoints with color-coded confidence."""
+    for (x, y), c in zip(preds.astype(int), confs):
+        if c >= high_th:
+            color = (0, 255, 0)  # green
+        elif c >= mid_th:
+            color = (0, 255, 255)  # yellow
+        else:
+            color = (0, 0, 255)  # red
         cv2.drawMarker(frame_bgr, (x, y), color, markerType=cv2.MARKER_CROSS, markerSize=6, thickness=2)
 
 
@@ -61,6 +67,8 @@ def main():
     parser.add_argument("--cam", type=int, default=0, help="Camera index (0 is default).")
     parser.add_argument("--img-size", type=int, default=None, help="Resize side for model input.")
     parser.add_argument("--num-keypoints", type=int, default=None, help="Override number of keypoints.")
+    parser.add_argument("--conf-mid", type=float, default=0.2, help="Confidence threshold for yellow.")
+    parser.add_argument("--conf-high", type=float, default=0.5, help="Confidence threshold for green.")
     args = parser.parse_args()
 
     cfg = load_config(Path(args.config))
@@ -93,10 +101,11 @@ def main():
             with torch.no_grad():
                 heatmaps = model(inp)
                 preds = eval_utils.heatmaps_to_coords(heatmaps)[0].cpu().numpy()  # (K, 2)
+                confs = heatmaps.amax(dim=(2, 3))[0].cpu().numpy()  # (K,)
 
             # Draw on resized frame for display
             display = cv2.resize(frame, (img_size, img_size))
-            draw_predictions(display, preds, color=(0, 0, 255))
+            draw_predictions(display, preds, confs, mid_th=args.conf_mid, high_th=args.conf_high)
 
             cv2.imshow("Hand Keypoints (red=pred)", display)
             key = cv2.waitKey(1) & 0xFF
