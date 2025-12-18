@@ -83,3 +83,4 @@ For full command-line options and descriptions for `visualise` and `live_demo`, 
 
 ## Future Improvements
 - **Data Cleaning**: Dataset has mislabelled keypoints for some photos. Need to go through with MediaPipe and mark the data points correctly
+- **Robust**: Model is not robust to angle changes and different backgrounds. Will benefit form data cleaning as trickier photos are poorly labelled
