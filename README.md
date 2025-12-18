@@ -1,82 +1,80 @@
-# 🖐 Fingertip Detection using CNNs (Work in Progress)
+# Hand Keypoint Heatmaps (PyTorch)
 
-This project implements a **real-time fingertip detection system** using a **custom Convolutional Neural Network (CNN)** trained on the [Hand Keypoint Dataset](https://www.kaggle.com/datasets/riondsilva21/hand-keypoint-dataset-26k) to predict fingertip coordinates from RGB images. The goal is to enable **gesture-based computer interaction**, such as controlling audio or brightness levels through hand gestures.
+Lightweight U-Net that predicts heatmap targets for 21 hand keypoints (YOLO-format). Includes data loading, training, evaluation (PCK/pixel error), visualization, checkpointing, and a live webcam demo.
 
-## Current Status
+## Features
+- YOLO keypoint dataset loader with Gaussian heatmap targets and visibility masking.
+- Simple U-Net head outputting `(B, K, H, W)` heatmaps.
+- Masked MSE loss, PCK and pixel error evaluation.
+- Per-epoch visualizations (GT vs preds) saved to disk.
+- Live webcam demo with confidence-colored keypoints.
+- KaggleHub downloader for the dataset.
 
-**Implemented so far:**
-- Built and trained a **PyTorch CNN** from scratch to regress fingertip positions from images.  
-- Parsed YOLOv8 keypoint labels to extract **thumb, index, middle, ring, and little finger tips** (indices 4, 8, 12, 16, 20).   
-- Achieved **MSE loss ~0.01** on training/validation data, corresponding to ~13 pixel average error at 128×128 resolution.  
-- Clean project structure with modular `dataset.py`, `model.py`, and `train.py`.  
-- Dataset sourced and managed via **Kaggle** API.
-
-Currently training on CPU (Qualcomm Adreno), with cloud GPU training planned for improved performance.
-
-
-## How It Works
-
-1. Images are preprocessed and normalized to 128×128 resolution.  
-2. Keypoint labels are read from YOLOv8 text files, and fingertip coordinates are extracted and used as regression targets.  
-3. A CNN model predicts 10 outputs — (x, y) pairs for the 5 fingertips.  
-4. Model is trained with **Mean Squared Error loss** using **PyTorch**.  
-5. Validation is performed after every epoch to monitor generalization and avoid overfitting.
-
-
-## Tech Stack
-
-- Python  
-- PyTorch  
-- NumPy, Pandas  
-- OpenCV (for visualization)  
-- tqdm (progress bars)  
-- Kaggle Datasets
-
-
-## Features in Progress / To Come
-
-- **ResNet18 Backbone:**  
-  Replace the custom CNN with a pretrained ResNet18 for better accuracy and faster convergence.
-
-- **Live Camera Feed Integration:**  
-  Use OpenCV to connect the trained model to a real-time camera feed for fingertip tracking.
-
-- **Gesture Mapping:**  
-  Map different fingertip configurations to system actions (e.g., volume control, brightness, app switching).
-
-- **Visualization & Smoothing:**  
-  Add live fingertip visualization and temporal smoothing to stabilize predictions.
-
-- **Cloud Training:**  
-  Move training to a GPU environment (Google Colab / Kaggle Notebooks) for significant speedups.
-
-
-## Getting Started (Training)
-
-1. **Install dependencies**
+## Setup
 ```bash
-pip install torch torchvision torchaudio opencv-python numpy pandas tqdm
+# install deps (consider a venv)
+pip install -r requirements.txt
 ```
-2. **Download dataset**
+
+Kaggle credentials (for downloading):
+- Option 1: place `kaggle.json` at `~/.kaggle/kaggle.json` (chmod 600).
+- Option 2: export env vars `KAGGLE_USERNAME` and `KAGGLE_KEY`.
+
+## Download dataset
+Using KaggleHub:
 ```bash
-kaggle datasets download -d riondsilva21/hand-keypoint-dataset-26k
+python -m src.download_dataset --dataset owner/dataset-name --out data/hand_keypoint_dataset_26k
 ```
-3. **Run training**
+
+Using Kaggle CLI directly:
 ```bash
-kaggle datasets download -d riondsilva21/hand-keypoint-dataset-26k
+kaggle datasets download -d owner/dataset-name -p data/hand_keypoint_dataset_26k --unzip
 ```
-4. **Monitor loss**
-- Training and validation loss are printed every epoch.
-- Final model is saved as fingertip_model.pth.
 
+`config.yaml` should point to `images/{train,val}` and `labels/{train,val}` in that folder.
 
-## **Notes**
-- Fingertip indices used: 4, 8, 12, 16, 20
-- Labels are already normalized between 0–1 in YOLOv8 format.
-- Current CNN achieves stable training but is limited in accuracy — moving to ResNet18 is expected to lower MSE significantly.
+## Train
+Edit `config.yaml` (num_keypoints, img_size, splits, lr, sigma, etc.). Then:
+```bash
+python -m src.train --config config.yaml
+```
+Outputs:
+- Checkpoints: `outputs/checkpoints/epoch_*.pth` and `best_model.pth`
+- History: `outputs/checkpoints/history.json`
+- Per-epoch visuals: `outputs/checkpoints/vis/<run_tag>_epoch_<n>/sample_*.png` + epoch model.
 
+## Evaluate
+(Validation runs each epoch if `val_split` exists.) To run standalone:
+```python
+from torch.utils.data import DataLoader
+from src.dataset.hand_kp_yolo import HandKeypointYOLODataset, collate_fn
+from src.models.unet_kp import UNetKP
+from src import eval as eval_utils
 
-## **License**
+ds = HandKeypointYOLODataset(root="data/hand_keypoint_dataset_26k", split="val", num_keypoints=21, img_size=256)
+loader = DataLoader(ds, batch_size=8, shuffle=False, collate_fn=collate_fn)
+model = UNetKP(num_keypoints=21)
+model.load_state_dict(torch.load("outputs/checkpoints/best_model.pth"))
+metrics = eval_utils.evaluate_model(model, loader, torch.device("cpu"), pck_threshold=5.0)
+print(metrics)
+```
 
-This project is for **educational and research purposes**. Dataset licensed by respective sources on Kaggle.
+## Visualize labels/heatmaps
+Overlay ground-truth heatmaps and keypoints:
+```bash
+python -m src.visualise --config config.yaml --idx 0      # defaults from config
+python -m src.visualise --rotate-deg 30 --kp 5 --color-jitter  # extra transforms
+```
+
+## Live webcam demo
+Draw predicted keypoints on webcam frames (confidence-colored red/yellow/green):
+```bash
+python -m src.live_demo --config config.yaml --model outputs/checkpoints/best_model.pth
+# tweak confidence thresholds:
+python -m src.live_demo --conf-mid 0.2 --conf-high 0.6
+```
+
+## Notes
+- `sigma` controls heatmap spread; larger is smoother/easier early training.
+- `pck_threshold` is in pixels (matching `img_size`), adjust for use case.
 
