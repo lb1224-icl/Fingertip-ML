@@ -123,7 +123,7 @@ def plot_sample(
 
 def main():
     parser = argparse.ArgumentParser(description="Overlay ground-truth heatmaps on images.")
-    parser.add_argument("--config", type=str, default="data/config.yaml", help="Path to config.yaml.")
+    parser.add_argument("--config", type=str, default="config.yaml", help="Path to config.yaml.")
     parser.add_argument("--root", type=str, default=None, help="Dataset root (overrides config).")
     parser.add_argument("--split", type=str, default=None, help="Dataset split (train/val).")
     parser.add_argument("--idx", type=int, default=0, help="Sample index to visualize.")
@@ -145,7 +145,7 @@ def main():
             cfg = yaml.safe_load(f) or {}
 
     def infer_root_split(cfg_dict):
-        root = cfg_dict.get("dataset_root") or cfg_dict.get("path") or "data/hand_keypoint_dataset_26k"
+        root = cfg_dict.get("dataset_root") or cfg_dict.get("path") or "data"
         split = cfg_dict.get("train_split") or "train"
         train_path = cfg_dict.get("train")
         if train_path:

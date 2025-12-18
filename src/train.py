@@ -1,9 +1,11 @@
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
+import matplotlib.pyplot as plt
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -84,7 +86,7 @@ def build_dataloaders(cfg: Dict):
 def train_one_epoch(
     model: nn.Module,
     loader: DataLoader,
-    optimizer: torch.optim.Optimizer,
+    optimiser: torch.optim.Optimizer,
     device: torch.device,
 ) -> float:
     model.train()
@@ -95,16 +97,59 @@ def train_one_epoch(
         heatmaps = batch["heatmaps"].to(device)
         mask = batch["mask"].to(device)
 
-        optimizer.zero_grad()
+        optimiser.zero_grad()
         outputs = model(images)
         loss = masked_mse_loss(outputs, heatmaps, mask)
         loss.backward()
-        optimizer.step()
+        optimiser.step()
 
         running_loss += loss.item() * images.size(0)
         pbar.set_postfix({"loss": loss.item()})
 
     return running_loss / len(loader.dataset)
+
+
+@torch.no_grad()
+def visualise_predictions(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    out_dir: Path,
+    num_images: int = 5,
+):
+    """
+    Save a few images with GT keypoints (green) and predicted (red).
+    """
+    model.eval()
+    batch = next(iter(loader))
+    images = batch["image"].to(device)
+    outputs = model(images)
+    pred_coords = eval_utils.heatmaps_to_coords(outputs)  # (B, K, 2)
+
+    gt_coords, vis_mask = eval_utils.extract_gt_coords(batch["keypoints"], outputs.shape[1], device)
+    mask = torch.minimum(vis_mask, batch["mask"].to(device))
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    to_plot = min(num_images, images.size(0))
+
+    for i in range(to_plot):
+        img = images[i].cpu().permute(1, 2, 0).clamp(0, 1).numpy()
+        gt = gt_coords[i].cpu().numpy()
+        pred = pred_coords[i].cpu().numpy()
+        m = mask[i].cpu().numpy() > 0.5
+
+        fig, ax = plt.subplots(figsize=(4, 4))
+        ax.imshow(img)
+        # GT in green
+        if m.any():
+            ax.scatter(gt[m, 0], gt[m, 1], c="lime", s=15, marker="x", label="gt")
+        # Pred in red
+        ax.scatter(pred[m, 0], pred[m, 1], c="red", s=15, marker="+", label="pred")
+        ax.axis("off")
+        ax.legend(loc="lower right")
+        fig.tight_layout()
+        fig.savefig(out_dir / f"sample_{i}.png", dpi=200)
+        plt.close(fig)
 
 
 def main():
@@ -124,17 +169,18 @@ def main():
     train_loader, val_loader = build_dataloaders(cfg)
 
     model = UNetKP(num_keypoints=cfg["num_keypoints"], base_channels=32).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg["learning_rate"])
+    optimiser = torch.optim.Adam(model.parameters(), lr=cfg["learning_rate"])
 
     save_dir = Path(cfg.get("save_dir", "outputs/checkpoints"))
     save_dir.mkdir(parents=True, exist_ok=True)
 
     history = []
     best_pck = -1.0
+    run_tag = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     for epoch in range(1, cfg["epochs"] + 1):
         print(f"\nEpoch {epoch}/{cfg['epochs']}")
-        train_loss = train_one_epoch(model, train_loader, optimizer, device)
+        train_loss = train_one_epoch(model, train_loader, optimiser, device)
 
         metrics = {"pck": None, "mean_pixel_error": None, "num_keypoints": 0}
         if val_loader is not None:
@@ -157,7 +203,7 @@ def main():
             {
                 "epoch": epoch,
                 "model_state": model.state_dict(),
-                "optimizer_state": optimizer.state_dict(),
+                "optimiser_state": optimiser.state_dict(),
                 "train_loss": train_loss,
                 "metrics": metrics,
                 "config": cfg,
@@ -171,6 +217,13 @@ def main():
             torch.save(model.state_dict(), save_dir / "best_model.pth")
 
         history.append({"epoch": epoch, "train_loss": train_loss, **metrics})
+
+        # Save a few visualizations each epoch (use val loader if available, else train).
+        vis_loader = val_loader if val_loader is not None else train_loader
+        vis_dir = save_dir / f"{run_tag}_epoch_{epoch}"
+        visualise_predictions(model, vis_loader, device, vis_dir, num_images=5)
+        # Save epoch-specific model alongside visuals for easy browsing.
+        torch.save(model.state_dict(), vis_dir / "model.pth")
 
     # Save training history for logging/proof
     hist_path = save_dir / "history.json"
