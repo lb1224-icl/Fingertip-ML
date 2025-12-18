@@ -1,4 +1,5 @@
 import argparse
+import math
 import sys
 from pathlib import Path
 from typing import Optional
@@ -6,13 +7,15 @@ from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torchvision.transforms.functional as TF
+import yaml
 
 # Support both `python src/visualise.py` and `python -m src.visualise`.
 if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parent))
-    from dataset.hand_kp_yolo import HandKeypointYOLODataset
+    from dataset.hand_kp_yolo import HandKeypointYOLODataset, generate_heatmaps
 else:
-    from .dataset.hand_kp_yolo import HandKeypointYOLODataset
+    from .dataset.hand_kp_yolo import HandKeypointYOLODataset, generate_heatmaps
 
 
 def tensor_to_numpy(img: torch.Tensor) -> np.ndarray:
@@ -31,6 +34,41 @@ def overlay_heatmap(
     overlay = (1 - alpha) * img_np + alpha * color_hm
     overlay = np.clip(overlay, 0, 1)
     return overlay
+
+
+def rotate_sample(sample: dict, angle_deg: float, sigma: float) -> dict:
+    """Rotate image/keypoints around center; regenerate heatmaps."""
+    if abs(angle_deg) < 1e-3:
+        return sample
+
+    img = sample["image"]
+    h, w = img.shape[1:]
+    center = (w / 2.0, h / 2.0)
+
+    # torchvision rotates counterclockwise; we match coordinate update accordingly.
+    img_rot = TF.rotate(img, angle_deg, interpolation=TF.InterpolationMode.BILINEAR)
+
+    kps = sample["keypoints"].clone()
+    angle_rad = -angle_deg * math.pi / 180.0
+    cos_a, sin_a = math.cos(angle_rad), math.sin(angle_rad)
+    if kps.numel() > 0:
+        x = kps[..., 0] - center[0]
+        y = kps[..., 1] - center[1]
+        kps[..., 0] = x * cos_a - y * sin_a + center[0]
+        kps[..., 1] = x * sin_a + y * cos_a + center[1]
+        outside = (kps[..., 0] < 0) | (kps[..., 0] >= w) | (kps[..., 1] < 0) | (kps[..., 1] >= h)
+        kps[..., 2] = torch.where(outside, torch.zeros_like(kps[..., 2]), kps[..., 2])
+        kps = kps.clamp(min=0, max=max(h, w))
+
+    heatmaps = generate_heatmaps(kps, sample["heatmaps"].shape[0], h, w, sigma=sigma)
+
+    # Recompute visibility mask after rotation
+    if kps.numel() > 0:
+        visibility_mask = (kps[:, :, 2] >= 1).any(dim=0).float()
+    else:
+        visibility_mask = torch.zeros(sample["heatmaps"].shape[0], dtype=torch.float32)
+
+    return {**sample, "image": img_rot, "keypoints": kps, "heatmaps": heatmaps, "mask": visibility_mask}
 
 
 def plot_sample(
@@ -85,27 +123,62 @@ def plot_sample(
 
 def main():
     parser = argparse.ArgumentParser(description="Overlay ground-truth heatmaps on images.")
-    parser.add_argument("--root", type=str, default="data/hand_keypoint_dataset_26k", help="Dataset root.")
-    parser.add_argument("--split", type=str, default="train", help="Dataset split (train/val).")
+    parser.add_argument("--config", type=str, default="data/config.yaml", help="Path to config.yaml.")
+    parser.add_argument("--root", type=str, default=None, help="Dataset root (overrides config).")
+    parser.add_argument("--split", type=str, default=None, help="Dataset split (train/val).")
     parser.add_argument("--idx", type=int, default=0, help="Sample index to visualize.")
     parser.add_argument("--kp", type=int, default=-1, help="Keypoint index to show; -1 for aggregate.")
-    parser.add_argument("--img-size", type=int, default=256, help="Resize for images/heatmaps.")
-    parser.add_argument("--sigma", type=float, default=1.5, help="Gaussian sigma for heatmaps.")
-    parser.add_argument("--num-keypoints", type=int, default=21, help="Number of keypoints.")
+    parser.add_argument("--img-size", type=int, default=None, help="Resize for images/heatmaps.")
+    parser.add_argument("--sigma", type=float, default=None, help="Gaussian sigma for heatmaps.")
+    parser.add_argument("--num-keypoints", type=int, default=None, help="Number of keypoints.")
     parser.add_argument("--save", type=str, default=None, help="Optional path to save the figure.")
+    parser.add_argument("--color-jitter", action="store_true", help="Enable color jitter to see its effect.")
+    parser.add_argument("--augment", action="store_true", help="Use dataset augmentations (hflip).")
+    parser.add_argument("--rotate-deg", type=float, default=0.0, help="Rotate sample by degrees (CCW).")
     args = parser.parse_args()
 
+    # Load config defaults
+    cfg = {}
+    cfg_path = Path(args.config)
+    if cfg_path.exists():
+        with cfg_path.open("r") as f:
+            cfg = yaml.safe_load(f) or {}
+
+    def infer_root_split(cfg_dict):
+        root = cfg_dict.get("dataset_root") or cfg_dict.get("path") or "data/hand_keypoint_dataset_26k"
+        split = cfg_dict.get("train_split") or "train"
+        train_path = cfg_dict.get("train")
+        if train_path:
+            p = Path(train_path)
+            if "images" in p.parts:
+                try:
+                    root = str(p.parent.parent) 
+                    split = p.name
+                except Exception:
+                    pass
+        return root, split
+
+    root_default, split_default = infer_root_split(cfg)
+    root = args.root or root_default
+    split = args.split or split_default
+    num_kp = args.num_keypoints or cfg.get("num_keypoints") or (cfg.get("kpt_shape", [21])[0] if cfg.get("kpt_shape") else 21)
+    img_size = args.img_size or cfg.get("img_size", 256)
+    sigma = args.sigma or cfg.get("sigma", 1.5)
+
     dataset = HandKeypointYOLODataset(
-        root=args.root,
-        split=args.split,
-        num_keypoints=args.num_keypoints,
-        img_size=args.img_size,
-        sigma=args.sigma,
-        augment=False,
-        color_jitter=False,
+        root=root,
+        split=split,
+        num_keypoints=num_kp,
+        img_size=img_size,
+        sigma=sigma,
+        augment=args.augment,
+        color_jitter=args.color_jitter,
     )
 
     sample = dataset[args.idx]
+    if abs(args.rotate_deg) > 1e-3:
+        sample = rotate_sample(sample, args.rotate_deg, sigma=sigma)
+
     kp_index = None if args.kp < 0 else args.kp
     save_path = Path(args.save) if args.save else None
     plot_sample(sample, kp_index, save_path=save_path, show=True)
