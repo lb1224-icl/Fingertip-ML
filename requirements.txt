@@ -1,7 +1,7 @@
-torch
-torchvision
+numpy<2
 matplotlib
+Pillow
 tqdm
 pyyaml
+kaggle
 kagglehub
-opencv-python
