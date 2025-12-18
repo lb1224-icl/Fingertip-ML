@@ -5,9 +5,9 @@ train_split: train
 val_split: val 
 num_keypoints: 21
 img_size: 256
-sigma: 2
+sigma: 2.5
 batch_size: 16
-epochs: 20
+epochs: 30
 learning_rate: 0.001
 num_workers: 4
 save_dir: outputs/checkpoints
