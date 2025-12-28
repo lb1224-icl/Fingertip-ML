@@ -1,6 +1,6 @@
 names:
   0: "hand"
-dataset_root: data/hand_keypoint_dataset_26k/hand_keypoint_dataset_26k
+dataset_root: data/hand_keypoint_dataset_26k
 train_split: train
 val_split: val 
 num_keypoints: 21
