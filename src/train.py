@@ -218,12 +218,15 @@ def main():
 
         history.append({"epoch": epoch, "train_loss": train_loss, **metrics})
 
-        # Save a few visualizations each epoch (use val loader if available, else train).
-        vis_loader = val_loader if val_loader is not None else train_loader
-        vis_dir = save_dir / f"{run_tag}_epoch_{epoch}"
-        visualise_predictions(model, vis_loader, device, vis_dir, num_images=5)
-        # Save epoch-specific model alongside visuals for easy browsing.
-        torch.save(model.state_dict(), vis_dir / "model.pth")
+        vis_every = int(cfg.get("vis_every", 1))
+        vis_count = int(cfg.get("vis_count", 5))
+        if vis_every > 0 and (epoch % vis_every == 0):
+            # Save a few visualizations every N epochs (use val loader if available, else train).
+            vis_loader = val_loader if val_loader is not None else train_loader
+            vis_dir = save_dir / f"{run_tag}_epoch_{epoch}"
+            visualise_predictions(model, vis_loader, device, vis_dir, num_images=vis_count)
+            # Save epoch-specific model alongside visuals for easy browsing.
+            torch.save(model.state_dict(), vis_dir / "model.pth")
 
     # Save training history for logging/proof
     hist_path = save_dir / "history.json"
