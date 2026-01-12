@@ -9,7 +9,7 @@ sigma: 2
 batch_size: 16
 epochs: 40
 learning_rate: 0.001
-num_workers: 4
+num_workers: 2
 save_dir: outputs/checkpoints
 pck_threshold: 5.0  # pixels
 device: cuda 
