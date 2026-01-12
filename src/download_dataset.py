@@ -13,6 +13,7 @@ else:
 
 
 def copy_tree(src: Path, dst: Path):
+    # Copy the downloaded dataset cache into the working directory.
     dst.mkdir(parents=True, exist_ok=True)
     for item in src.iterdir():
         s = item
@@ -24,9 +25,10 @@ def copy_tree(src: Path, dst: Path):
 
 
 def main():
+    # Download dataset and copy into the working directory.
     parser = argparse.ArgumentParser(description="Download Kaggle dataset via kagglehub.")
     parser.add_argument("--dataset", type=str, required=True, help="Kaggle dataset slug, e.g., owner/dataset-name.")
-    parser.add_argument("--out", type=str, default="data/hand_keypoint_dataset_26k", help="Destination directory.")
+    parser.add_argument("--out", type=str, default="data", help="Destination directory.")
     args = parser.parse_args()
 
     if kagglehub is None:

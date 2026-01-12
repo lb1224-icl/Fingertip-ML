@@ -23,13 +23,23 @@ Kaggle credentials (for downloading):
 ## Download dataset
 Using KaggleHub:
 ```bash
-python -m src.download_dataset --dataset owner/dataset-name --out data/hand_keypoint_dataset_26k
+python -m src.download_dataset --dataset riondsilva21/hand-keypoint-dataset-26k --out data
 ```
 
 Using Kaggle CLI directly:
 ```bash
-kaggle datasets download -d owner/dataset-name -p data/hand_keypoint_dataset_26k --unzip
+kaggle datasets download -d riondsilva21/hand-keypoint-dataset-26k -p data --unzip
 ```
+
+## Clean dataset
+Run the label cleaner after download (in-place):
+```bash
+python -m src.clean_dataset --root data/hand_keypoint_dataset_26k
+```
+
+Cleaning does:
+- Recomputes bounding boxes from keypoints.
+- Sets visibility `v=0` if a keypoint is outside the image, otherwise `v=2`.
 
 `config.yaml` should point to `images/{train,val}` and `labels/{train,val}` in that folder.
 

@@ -121,6 +121,72 @@ def plot_sample(
     plt.close(fig)
 
 
+def interactive_dataset_view(dataset, start_idx: int, kp_index: Optional[int]):
+    """Interactive view: use left/right keys to change dataset index."""
+    idx_state = {"idx": max(0, min(start_idx, len(dataset) - 1))}
+
+    fig, axes = plt.subplots(1, 2, figsize=(8, 4))
+    axes[0].axis("off")
+    axes[1].axis("off")
+    title = axes[1].set_title("")
+
+    img_im = axes[0].imshow(np.zeros((10, 10, 3)), origin="upper")
+    overlay_im = axes[1].imshow(np.zeros((10, 10, 3)), origin="upper")
+    scatters = []
+
+    def redraw():
+        for s in scatters:
+            s.remove()
+        scatters.clear()
+
+        sample = dataset[idx_state["idx"]]
+        image = sample["image"]
+        heatmaps = sample["heatmaps"]
+        keypoints = sample["keypoints"]
+        mask = sample["mask"]
+
+        if kp_index is None:
+            hm = torch.max(heatmaps, dim=0).values
+            title.set_text(f"Idx {idx_state['idx']} (all keypoints)")
+        else:
+            hm = heatmaps[kp_index]
+            visible = bool(mask[kp_index] > 0.5)
+            title.set_text(f"Idx {idx_state['idx']} | KP {kp_index} ({'vis' if visible else 'not vis'})")
+
+        img_np = tensor_to_numpy(image)
+        h, w = img_np.shape[:2]
+        overlay = overlay_heatmap(image, hm)
+        img_im.set_data(img_np)
+        overlay_im.set_data(overlay)
+        img_im.set_extent((0, w, h, 0))
+        overlay_im.set_extent((0, w, h, 0))
+        axes[0].set_xlim(0, w)
+        axes[0].set_ylim(h, 0)
+        axes[1].set_xlim(0, w)
+        axes[1].set_ylim(h, 0)
+
+        if keypoints.numel() > 0:
+            pts = keypoints[0].cpu()
+            for ax in axes:
+                scatters.append(ax.scatter(pts[:, 0], pts[:, 1], s=10, c="lime", marker="x"))
+
+        fig.canvas.draw_idle()
+
+    def on_key(event):
+        if event.key == "right":
+            idx_state["idx"] = (idx_state["idx"] + 1) % len(dataset)
+            redraw()
+        elif event.key == "left":
+            idx_state["idx"] = (idx_state["idx"] - 1) % len(dataset)
+            redraw()
+
+    fig.canvas.mpl_connect("key_press_event", on_key)
+    redraw()
+    fig.tight_layout()
+    plt.show()
+    plt.close(fig)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Overlay ground-truth heatmaps on images.")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to config.yaml.")
@@ -181,7 +247,11 @@ def main():
 
     kp_index = None if args.kp < 0 else args.kp
     save_path = Path(args.save) if args.save else None
-    plot_sample(sample, kp_index, save_path=save_path, show=True)
+    if save_path is not None:
+        plot_sample(sample, kp_index, save_path=save_path, show=False)
+    else:
+        # Interactive by default: left/right keys cycle dataset index.
+        interactive_dataset_view(dataset, start_idx=args.idx, kp_index=kp_index)
 
 
 if __name__ == "__main__":
